@@ -6,6 +6,8 @@ Async subagents for [pi](https://github.com/badlogic/pi-mono), running in Herdr 
 
 ## Install in Herdr
 
+This branch targets Pi **1.5.x** and Node **22.19.0+** (Node 24 is used for the test suite). It uses `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`, matching Pi 1.5.0. Development versions are pinned; runtime peer requirements accept compatible 1.x releases.
+
 After publishing this branch to the fork:
 
 ```bash
