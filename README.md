@@ -1,12 +1,55 @@
 # pi-interactive-subagents
 
-Async subagents for [pi](https://github.com/badlogic/pi-mono), running in tmux panes. Spawn a sub-agent, keep working in the main session, and get the result steered back when it finishes. Fully non-blocking.
+Async subagents for [pi](https://github.com/badlogic/pi-mono), running in Herdr or tmux panes. Spawn a sub-agent, keep working in the main session, and get the result steered back when it finishes. Fully non-blocking.
 
-**tmux-only fork.** See [Acknowledgements](#acknowledgements) for the upstream project, which also supports cmux, zellij, and WezTerm.
+**Herdr adaptation of the tmux fork.** This branch adds a Herdr 0.9.5 CLI backend while retaining tmux support. See [Acknowledgements](#acknowledgements) for the upstream projects.
+
+## Install in Herdr
+
+After publishing this branch to the fork:
+
+```bash
+pi install git:github.com/Dakoro/pi-interactive-subagents@feat/herdr-backend
+herdr
+# In a Herdr pane:
+pi
+```
+
+For a local checkout (including one prepared by applying the adaptation patch), run `pi install /absolute/path/to/pi-interactive-subagents` instead of the remote install command.
+
+Replace the original package installation with this fork; loading both registers the same tools twice. This fork retains the `subagent`, `subagent_message`, and `subagents_list` names, which can also collide with other subagent packages.
+
+`PI_SUBAGENT_MUX=auto` (the default) selects Herdr when `HERDR_ENV=1`, otherwise tmux. Override with `PI_SUBAGENT_MUX=herdr` or `PI_SUBAGENT_MUX=tmux`. An unavailable explicitly selected backend is an error; an incomplete Herdr environment never silently falls back to an outer tmux session. Herdr requires `HERDR_PANE_ID`, `HERDR_SOCKET_PATH`, and the CLI (`HERDR_BIN_PATH` or `herdr` on PATH).
+
+The Herdr backend:
+
+- Splits right from the calling agent's pane with `--no-focus`, then labels the new pane. Explicit downward splits are also supported.
+- Sends launches and messages through `pane run` (ordered bracketed paste + Enter), reads unwrapped output, and closes completed panes.
+- Reports child states as `working`, `idle`, and `blocked` (when `ask_question` awaits a reply), including when the child runs with `--no-extensions`. Reporting registers no additional tools.
+- Pins nested spawns to the same backend and explicitly preserves the working directory on launch and sandboxed resume.
+
+The parent widget and session registry remain responsible for result delivery and `subagent_message` resume. Herdr's `idle`/`done` display is not used as proof of task success. No Herdr-wide layout is applied, no worktree isolation is added, and automatic recovery after a Herdr server restart is outside this adaptation. For restricted children, use this extension's saved-loadout resume path rather than assuming a native Herdr resume restores their restrictions.
+
+Bundled model defaults are unchanged (`openrouter/z-ai/glm-5.3`). Set `model` in your local agent definitions or pass a model override to use your configured local provider.
+
+### Validation
+
+With Node 24 and dependencies installed:
+
+```bash
+npm ci
+npm test                  # Unit tests and simulated CLI contract tests
+# Inside a live Herdr pane; no model/provider calls:
+PI_SUBAGENT_MUX=herdr npm run test:herdr
+```
+
+The live test creates and closes temporary panes. It checks script execution, a child-specific Herdr pane identity, exit detection, and a targeted nested split. Full Pi/model lifecycle testing (parallel tasks, questions, messaging, resume) still needs a real configured Pi session.
+
+The adaptation was checked against the Herdr 0.9.5 documented CLI and release binary's offline schema. The development container refused to start its server (`Operation not permitted`), so live Herdr and end-to-end model validation have not been completed here.
 
 ## How it works
 
-`subagent()` returns immediately. The sub-agent runs in its own tmux pane — a right split off the parent pi pane, so pane creation never steals keyboard focus. A live widget above the input tracks every running sub-agent, and when one finishes, its result is steered into the main session as a notification that triggers a new turn.
+`subagent()` returns immediately. The sub-agent runs in its own Herdr or tmux pane — a right split off the parent pi pane, so pane creation never steals keyboard focus. A live widget above the input tracks every running sub-agent, and when one finishes, its result is steered into the main session as a notification that triggers a new turn.
 
 ```
 ╭─ Subagents ──────────────────────────── 2 running ─╮
@@ -17,7 +60,7 @@ Async subagents for [pi](https://github.com/badlogic/pi-mono), running in tmux p
 
 Spawn several in parallel — they run concurrently and steer results back independently as each finishes.
 
-Panes are kept evenly sized: the extension re-applies an `even-horizontal` layout after every spawn and exit (debounced). The layout is a single constant, `SUBAGENT_TMUX_LAYOUT` in `pi-extension/subagents/tmux.ts` — change it to any named tmux layout (`main-vertical`, `tiled`, …).
+With tmux, panes are kept evenly sized: the extension re-applies an `even-horizontal` layout after every spawn and exit (debounced). The layout is a single constant, `SUBAGENT_TMUX_LAYOUT` in `pi-extension/subagents/mux.ts` — change it to any named tmux layout (`main-vertical`, `tiled`, …).
 
 If your shell startup is slow and launch commands get dropped before the prompt is ready, raise the delay:
 
@@ -29,7 +72,7 @@ export PI_SUBAGENT_SHELL_READY_DELAY_MS=2500   # default: 500
 
 | Tool | Description |
 | --- | --- |
-| `subagent` | Spawn a sub-agent in a dedicated tmux pane (async) |
+| `subagent` | Spawn a sub-agent in a dedicated Herdr or tmux pane (async) |
 | `subagent_message` | Message a sub-agent by name — steers it if running, resumes its session if finished |
 | `subagents_list` | List available agent definitions |
 | `ask_question` | *(sub-agent sessions only)* Ask the orchestrator a question and wait for the reply |
@@ -178,7 +221,7 @@ Status display is configured via `config.json` in the extension directory (copy 
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono)
-- [tmux](https://github.com/tmux/tmux)
+- [Herdr](https://github.com/herdrdev/herdr) 0.9.5 or [tmux](https://github.com/tmux/tmux)
 
 ```bash
 tmux new -A -s pi 'pi'
@@ -186,7 +229,9 @@ tmux new -A -s pi 'pi'
 
 ## Acknowledgements
 
-Forked from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents), which originated the subagent architecture, the multi-multiplexer surface layer, and the status widget; its supervision features were inspired by [RepoPrompt](https://repoprompt.com/).
+This adaptation is based on [amosblomqvist/pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents).
+
+The tmux fork was forked from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents), which originated the subagent architecture, the multi-multiplexer surface layer, and the status widget; its supervision features were inspired by [RepoPrompt](https://repoprompt.com/).
 
 ## License
 

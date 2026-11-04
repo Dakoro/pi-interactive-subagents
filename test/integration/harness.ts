@@ -23,7 +23,8 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import {
-  isMuxAvailable,
+  isTmuxAvailable,
+  getMuxBackend,
   createSurface,
   createSurfaceSplit,
   sendCommand,
@@ -80,7 +81,7 @@ export const PI_TIMEOUT = Number(process.env.PI_TEST_TIMEOUT ?? "120000");
  * Returns ["tmux"] or [].
  */
 export function getAvailableBackends(): string[] {
-  return isMuxAvailable() ? ["tmux"] : [];
+  return isTmuxAvailable() && getMuxBackend() === "tmux" ? ["tmux"] : [];
 }
 
 export function focusSurface(surface: string): void {

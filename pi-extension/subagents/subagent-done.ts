@@ -17,6 +17,7 @@ import { Box, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder } from "./activity.ts";
+import { createHerdrStateReporter } from "./herdr-state.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
   return agentStarted;
@@ -111,6 +112,7 @@ export function parseDeniedTools(rawValue: string | undefined): string[] {
 }
 
 export default function (pi: ExtensionAPI) {
+  const herdr = createHerdrStateReporter();
   let toolNames: string[] = [];
   let denied: string[] = [];
   let expanded = false;
@@ -186,6 +188,7 @@ export default function (pi: ExtensionAPI) {
 
   // Show widget + status bar on session start
   pi.on("session_start", (_event, ctx) => {
+    void herdr.report("idle");
     recorder.sessionStart();
     const tools = pi.getAllTools();
     toolNames = tools.map((t) => t.name).sort();
@@ -195,6 +198,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("input", () => {
+    void herdr.report("working");
     recorder.input();
     // A submitted message is the orchestrator's (or a human's) reply — the
     // pending ask_question has been answered, however it was delivered. Clear
@@ -216,6 +220,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", () => {
+    void herdr.report("working");
     agentStarted = true;
     // A new turn is starting — any pending ask_question has now been answered
     // (or superseded), so let auto-exit resume normally when this turn ends.
@@ -224,6 +229,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", (event, ctx) => {
+    void herdr.report(awaitingAnswer ? "blocked" : "idle");
     const messages = (event as any).messages as any[] | undefined;
     // Never shut down while this session still has work in flight:
     //  - awaitingAnswer: an ask_question is pending the orchestrator's reply.
@@ -316,7 +322,8 @@ export default function (pi: ExtensionAPI) {
     recorder.toolExecutionEnd((event as any).toolCallId, (event as any).toolName);
   });
 
-  pi.on("session_shutdown", (event) => {
+  pi.on("session_shutdown", async (event) => {
+    await herdr.release();
     recorder.sessionShutdown((event as any).reason);
   });
 
@@ -367,6 +374,7 @@ export default function (pi: ExtensionAPI) {
       // "waiting" phase. The parent's watcher picks up the `.ask` signal and
       // notifies the orchestrator, who replies via subagent_message.
       awaitingAnswer = true;
+      void herdr.report("blocked", params.question);
       recorder.askQuestion();
       const askData = {
         name: process.env.PI_SUBAGENT_NAME ?? "subagent",
